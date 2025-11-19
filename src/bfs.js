@@ -6,36 +6,40 @@ import { getLinks } from "./wiki.js";
  * - level-by-level BFS to guarantee shortest path by edges
  * - returns array of titles or null
  */
-export async function findPathBFS(start, target, maxDepth = 4) {
-  if (!start || !target) return null;
+export async function findPathFilteredByPerson(start, target, maxDepth = 4) {
   if (start === target) return [start];
-
   const visited = new Set([start]);
-  let queue = [[start]]; // each element is a path array
+  let queue = [[start]];
   let depth = 0;
-  let nodesExplored = 0;
-  let apiCalls = 0;
 
   while (queue.length > 0 && depth <= maxDepth) {
     const nextQueue = [];
+    // collect neighbors for entire layer first (to batch)
+    const layerNeighborsMap = {}; // pathIndex -> neighbors array
+    const allNeighbors = new Set();
     for (const path of queue) {
       const last = path[path.length - 1];
-      nodesExplored++;
       let neighbors = [];
       try {
         neighbors = await getLinks(last);
-        apiCalls++;
       } catch (err) {
-        console.warn(`getLinks failed for ${last}: ${err.message}`);
-        continue; // skip this node
+        continue;
       }
+      layerNeighborsMap[last] = neighbors;
+      for (const nb of neighbors) allNeighbors.add(nb);
+    }
+    // batch check which neighbors are person
+    const allNeighborsArr = Array.from(allNeighbors);
+    const personMap = await titlesArePerson(allNeighborsArr); // title -> bool
 
+    for (const path of queue) {
+      const last = path[path.length - 1];
+      const neighbors = layerNeighborsMap[last] || [];
       for (const nb of neighbors) {
         if (visited.has(nb)) continue;
+        if (!personMap[nb]) continue; // skip non-person
         const newPath = [...path, nb];
-        if (nb === target) {
-          return { path: newPath, stats: { nodesExplored, apiCalls, depth } };
-        }
+        if (nb === target) return newPath;
         visited.add(nb);
         nextQueue.push(newPath);
       }
@@ -43,5 +47,5 @@ export async function findPathBFS(start, target, maxDepth = 4) {
     queue = nextQueue;
     depth++;
   }
-  return { path: null, stats: { nodesExplored, apiCalls, depth } };
+  return null;
 }
